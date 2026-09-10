@@ -140,28 +140,43 @@ async function conectar(){
     cands.forEach(function(c,i){ h+='<option value="'+i+'">'+c.desc+'</option>'; });
     sel.innerHTML=h;
 
-    /* prefere a interface de MIDI (classe 1 / subclasse 3); senão a primeira */
-    var pref=0;
-    for(var i=0;i<cands.length;i++){ if(cands[i].desc.indexOf("classe 1/3")>=0){ pref=i; break; } }
-    sel.value=String(pref);
     log(cands.length+" saída(s) encontrada(s):");
     cands.forEach(function(c){ log("   "+c.desc); });
 
-    await usarInterface(pref);
+    /* tenta reservar cada uma até alguma aceitar */
+    var ok=false;
+    for(var i=0;i<cands.length;i++){
+      if(await usarInterface(i,true)){ sel.value=String(i); ok=true; break; }
+    }
+    if(!ok){
+      estado(false,"bloqueado");
+      log("");
+      log("NENHUMA interface pôde ser reservada.");
+      log("Outro app está segurando a pedaleira. No tablet:");
+      log("  1. Config › Apps › Midi Chief › Forçar parada");
+      log("  2. No mesmo lugar: Abrir por padrão › Limpar padrões");
+      log("  3. Desconecte e reconecte o cabo OTG");
+      log("  4. Recarregue esta página e toque em Conectar");
+    }
   }catch(e){ log("ERRO ao abrir: "+e.message); estado(false,"erro"); }
 }
 
-async function usarInterface(i){
-  var c=cands[i]; if(!c) return;
+async function usarInterface(i,silencioso){
+  var c=cands[i]; if(!c) return false;
   try{
     if(ifaceNum!==null && ifaceNum!==c.iface){ try{ await dev.releaseInterface(ifaceNum); }catch(e){} }
     await dev.claimInterface(c.iface);
     if(c.alt) await dev.selectAlternateInterface(c.iface,c.alt);
     ifaceNum=c.iface; altNum=c.alt; epOut=c.ep;
     estado(true,"conectado");
-    log("Usando "+c.desc);
+    log("OK — reservada a iface "+c.iface+" (ep "+c.ep+")");
     document.getElementById("nowName").textContent="Pronto — toque num timbre";
-  }catch(e){ log("Não consegui reservar a interface: "+e.message); estado(false,"bloqueado"); }
+    return true;
+  }catch(e){
+    log("iface "+c.iface+" recusou: "+(e&&e.message?e.message:e));
+    if(!silencioso) estado(false,"bloqueado");
+    return false;
+  }
 }
 
 function hex(v){ return "0x"+Number(v).toString(16).padStart(4,"0"); }
