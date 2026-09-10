@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>GT-001 · USB direto</title>
+<style>
+:root{--bg:#0d1117;--panel:#161b22;--panel2:#1c2333;--line:#2b3444;--txt:#e9eef6;
+  --dim:#8b98ad;--accent:#3fb6ff;--accent2:#1c7ed6;--ok:#31c07a;--err:#e5484d;--gold:#ffd166;
+  color-scheme:dark}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  display:flex;flex-direction:column;user-select:none}
+button{font-family:inherit;color:inherit;border:0;background:none}
+header{padding:12px 14px;background:var(--panel);border-bottom:1px solid var(--line);
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.brand{font-size:16px;font-weight:800}
+.brand small{display:block;font-size:10px;color:var(--dim);letter-spacing:1.2px}
+.spacer{flex:1}
+.btn{padding:12px 16px;border-radius:12px;background:var(--panel2);border:1px solid var(--line);
+  font-weight:800;font-size:14px}
+.btn:active{transform:scale(.97)}
+.btn.primary{background:var(--accent2);border-color:var(--accent2)}
+.pill{display:inline-flex;align-items:center;gap:7px;padding:8px 12px;border-radius:999px;
+  background:var(--panel2);border:1px solid var(--line);font-size:13px;font-weight:700}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--err)}
+.dot.on{background:var(--ok)}
+#now{padding:16px 14px;background:linear-gradient(180deg,#16283f,#0d1117);
+  border-bottom:1px solid var(--line);display:flex;align-items:center;gap:16px}
+#nowNum{font-size:52px;font-weight:900;color:#0d1117;background:var(--gold);
+  padding:4px 18px;border-radius:14px;min-width:170px;text-align:center;line-height:1.1}
+#nowName{font-size:22px;font-weight:800}
+#cfg{padding:12px 14px;background:var(--panel2);border-bottom:1px solid var(--line);
+  display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+#cfg label{font-size:12px;color:var(--dim);font-weight:800;letter-spacing:.4px}
+select,input[type=number]{padding:10px;border-radius:10px;background:var(--panel);
+  border:1px solid var(--line);color:var(--txt);font-size:15px;font-family:inherit}
+main{flex:1;overflow-y:auto;padding:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px;margin-bottom:16px}
+.pbtn{background:var(--panel);border:2px solid var(--line);border-radius:18px;padding:16px;
+  text-align:left;min-height:96px;display:flex;align-items:center;gap:14px}
+.pbtn:active{background:var(--panel2)}
+.pnum{font-size:24px;font-weight:900;color:var(--accent);min-width:70px}
+.pbtn .lbl{font-size:18px;font-weight:800}
+.pbtn.active{border-color:var(--gold);background:#2a2413}
+.pbtn.active .pnum{color:var(--gold)}
+#log{background:#0a0e14;border:1px solid var(--line);border-radius:12px;padding:12px;
+  font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;line-height:1.6;
+  white-space:pre-wrap;color:#a9b6c8;max-height:260px;overflow-y:auto}
+h3{font-size:13px;color:var(--dim);letter-spacing:1px;margin:18px 0 8px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">GT-001 · USB DIRETO<small>WEBUSB</small></div>
+  <div class="spacer"></div>
+  <span class="pill"><span class="dot" id="dot"></span><span id="st">desligado</span></span>
+  <button class="btn primary" id="conectar">Conectar</button>
+</header>
+
+<div id="now">
+  <div id="nowNum">--</div>
+  <div><div id="nowName">Toque em Conectar</div></div>
+</div>
+
+<div id="cfg">
+  <label>Interface</label><select id="iface"></select>
+  <label>Cable</label>
+  <select id="cable">
+    <option>0</option><option>1</option><option>2</option><option>3</option>
+  </select>
+  <label>Canal</label><input type="number" id="ch" value="1" min="1" max="16" style="width:72px">
+  <label>Patch</label><input type="number" id="manual" value="30" min="1" max="200" style="width:88px">
+  <button class="btn" id="enviarManual">Enviar</button>
+</div>
+
+<main>
+  <div class="grid" id="botoes"></div>
+  <h3>REGISTRO</h3>
+  <div id="log">aguardando…</div>
+</main>
+
+<script>
+"use strict";
+
+var TIMBRES=[
+ {l:"Limpo ambiente",n:30},{l:"Limpo definido",n:42},{l:"Crunch",n:31},{l:"Drive rítmico",n:32},
+ {l:"Lead",n:33},{l:"Pad fixo",n:34},{l:"Delay pontuado",n:35},{l:"Rock",n:28}
+];
+var ROLAND=0x0582;
+var dev=null, ifaceNum=null, altNum=0, epOut=null, cands=[], atual=0;
+
+function log(m){var d=document.getElementById("log");
+  d.textContent=(new Date().toLocaleTimeString()+"  "+m+"\n")+d.textContent;}
+function uu(n){return "U"+String(n).padStart(3,"0");}
+function estado(on,txt){document.getElementById("dot").className="dot"+(on?" on":"");
+  document.getElementById("st").textContent=txt;}
+
+/* ---- desenha os botões ---- */
+(function(){
+  var h="";
+  TIMBRES.forEach(function(t){
+    h+='<button class="pbtn" data-n="'+t.n+'"><div class="pnum">'+uu(t.n)+'</div>'+
+       '<div class="lbl">'+t.l+'</div></button>';
+  });
+  document.getElementById("botoes").innerHTML=h;
+})();
+
+/* ---- conexão WebUSB ---- */
+async function conectar(){
+  if(!navigator.usb){ log("ERRO: este navegador não tem WebUSB. Use o Chrome."); return; }
+  if(!window.isSecureContext){ log("ERRO: abra por um endereço https."); return; }
+  try{
+    dev = await navigator.usb.requestDevice({filters:[{vendorId:ROLAND},{}]});
+  }catch(e){ log("Nenhum aparelho escolhido."); return; }
+
+  try{
+    await dev.open();
+    log("Aberto: "+(dev.productName||"?")+"  (VID "+hex(dev.vendorId)+" PID "+hex(dev.productId)+")");
+    if(!dev.configuration) await dev.selectConfiguration(1);
+
+    cands=[];
+    dev.configuration.interfaces.forEach(function(itf){
+      itf.alternates.forEach(function(alt){
+        var out=alt.endpoints.filter(function(e){return e.direction==="out"&&e.type==="bulk";});
+        if(out.length){
+          cands.push({iface:itf.interfaceNumber, alt:alt.alternateSetting, ep:out[0].endpointNumber,
+            desc:"iface "+itf.interfaceNumber+" alt "+alt.alternateSetting+
+                 " · classe "+alt.interfaceClass+"/"+alt.interfaceSubclass+
+                 " · ep "+out[0].endpointNumber});
+        }
+      });
+    });
+
+    if(!cands.length){ log("Nenhuma saída bulk encontrada. Este aparelho não expõe MIDI por USB padrão."); estado(false,"sem saída"); return; }
+
+    var sel=document.getElementById("iface"), h="";
+    cands.forEach(function(c,i){ h+='<option value="'+i+'">'+c.desc+'</option>'; });
+    sel.innerHTML=h;
+
+    /* prefere a interface de MIDI (classe 1 / subclasse 3); senão a primeira */
+    var pref=0;
+    for(var i=0;i<cands.length;i++){ if(cands[i].desc.indexOf("classe 1/3")>=0){ pref=i; break; } }
+    sel.value=String(pref);
+    log(cands.length+" saída(s) encontrada(s):");
+    cands.forEach(function(c){ log("   "+c.desc); });
+
+    await usarInterface(pref);
+  }catch(e){ log("ERRO ao abrir: "+e.message); estado(false,"erro"); }
+}
+
+async function usarInterface(i){
+  var c=cands[i]; if(!c) return;
+  try{
+    if(ifaceNum!==null && ifaceNum!==c.iface){ try{ await dev.releaseInterface(ifaceNum); }catch(e){} }
+    await dev.claimInterface(c.iface);
+    if(c.alt) await dev.selectAlternateInterface(c.iface,c.alt);
+    ifaceNum=c.iface; altNum=c.alt; epOut=c.ep;
+    estado(true,"conectado");
+    log("Usando "+c.desc);
+    document.getElementById("nowName").textContent="Pronto — toque num timbre";
+  }catch(e){ log("Não consegui reservar a interface: "+e.message); estado(false,"bloqueado"); }
+}
+
+function hex(v){ return "0x"+Number(v).toString(16).padStart(4,"0"); }
+
+/* ---- envio: pacotes USB-MIDI de 4 bytes ----
+   byte0 = (cable << 4) | CIN     CIN 0xC = Program Change, 0xB = Control Change  */
+async function enviar(patch){
+  atual=patch;
+  document.getElementById("nowNum").textContent=uu(patch);
+  document.getElementById("nowName").textContent=(TIMBRES.filter(function(t){return t.n===patch;})[0]||{l:"Patch"}).l;
+  var b=document.querySelectorAll(".pbtn");
+  for(var i=0;i<b.length;i++) b[i].classList.toggle("active",+b[i].dataset.n===patch);
+
+  if(!dev||epOut===null){ log("Não conectado."); return; }
+  var cable=+document.getElementById("cable").value;
+  var ch=Math.max(1,Math.min(16,+document.getElementById("ch").value))-1;
+  var banco = patch>100 ? 1 : 0;
+  var pc = (patch>100 ? patch-101 : patch-1) & 0x7F;
+
+  var pacote=new Uint8Array([
+    (cable<<4)|0x0B, 0xB0|ch, 0x00, banco,   // Bank Select MSB
+    (cable<<4)|0x0B, 0xB0|ch, 0x20, 0x00,    // Bank Select LSB
+    (cable<<4)|0x0C, 0xC0|ch, pc,   0x00     // Program Change
+  ]);
+  try{
+    await dev.transferOut(epOut,pacote);
+    log("enviado "+uu(patch)+"  (PC "+pc+", canal "+(ch+1)+", cable "+cable+")");
+  }catch(e){ log("falha no envio: "+e.message); }
+}
+
+document.getElementById("conectar").onclick=conectar;
+document.getElementById("iface").onchange=function(){ usarInterface(+this.value); };
+document.getElementById("botoes").addEventListener("click",function(e){
+  var b=e.target.closest(".pbtn"); if(b) enviar(+b.dataset.n);
+});
+document.getElementById("enviarManual").onclick=function(){
+  enviar(Math.max(1,Math.min(200,+document.getElementById("manual").value)));
+};
+
+log("Pronto. Ligue o cabo OTG, a pedaleira, e toque em Conectar.");
+if(!navigator.usb) log("ATENÇÃO: WebUSB indisponível neste navegador.");
+</script>
+</body>
+</html>
